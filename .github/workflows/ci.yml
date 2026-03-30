@@ -1,9 +1,9 @@
 # CI/CD: install deps, Playwright Chromium, collection smoke, optional E2E (GeoManager upload flow).
 #
-# Full Playwright suite runs when repository secrets GM_USERNAME and GM_PASSWORD are set.
-# Optional: GM_OTP_CODE if your tenant always shows MFA after password.
-#
-# GitHub does not allow `secrets` in job-level `if`. E2E is gated via a step output.
+# E2E runs when EITHER pair of secrets is set (trimmed, non-empty):
+#   - GM_USERNAME + GM_PASSWORD  (this repo’s convention), OR
+#   - VALID_USERNAME + VALID_PASSWORD  (same names as GMloginMFA — reuse without duplicating secrets)
+# Optional: GM_OTP_CODE (MFA). GitHub does not allow `secrets` in job-level `if`; E2E is gated via outputs.
 
 name: CI
 
@@ -59,33 +59,42 @@ jobs:
     steps:
       - name: Check required secrets
         id: gate
+        env:
+          S_GM_USER: ${{ secrets.GM_USERNAME }}
+          S_GM_PASS: ${{ secrets.GM_PASSWORD }}
+          S_VAL_USER: ${{ secrets.VALID_USERNAME }}
+          S_VAL_PASS: ${{ secrets.VALID_PASSWORD }}
         run: |
-          U=$(printf '%s' "$GM_USERNAME" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-          P=$(printf '%s' "$GM_PASSWORD" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+          trim() { printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+          U=$(trim "$S_GM_USER")
+          [ -z "$U" ] && U=$(trim "$S_VAL_USER")
+          P=$(trim "$S_GM_PASS")
+          [ -z "$P" ] && P=$(trim "$S_VAL_PASS")
           if [ -n "$U" ] && [ -n "$P" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             {
               echo "## E2E gate"
-              echo "Secrets \`GM_USERNAME\` and \`GM_PASSWORD\` are set. Running \`pytest tests/\`."
+              echo "Credentials found via **GM_USERNAME** / **GM_PASSWORD** or **VALID_USERNAME** / **VALID_PASSWORD**. Running \`pytest tests/\`."
             } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
             {
               echo "## E2E gate — skipped"
-              echo "Missing **GM_USERNAME** and/or **GM_PASSWORD** (case-sensitive names)."
+              echo "Add **one** of these secret pairs (repository → **Settings** → **Secrets and variables** → **Actions**):"
               echo ""
-              echo "Add them under **Settings → Secrets and variables → Actions**."
-              echo "Optional: **GM_OTP_CODE** for MFA after password."
+              echo "| Pair | Secret names |"
+              echo "|------|----------------|"
+              echo "| A (this repo) | \`GM_USERNAME\`, \`GM_PASSWORD\` |"
+              echo "| B (same as GMloginMFA) | \`VALID_USERNAME\`, \`VALID_PASSWORD\` |"
+              echo ""
+              echo "Optional: \`GM_OTP_CODE\` if MFA appears after password."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-        env:
-          GM_USERNAME: ${{ secrets.GM_USERNAME }}
-          GM_PASSWORD: ${{ secrets.GM_PASSWORD }}
 
       - name: Full E2E skipped — add repository secrets
         if: steps.gate.outputs.run != 'true'
         run: |
-          echo "::notice title=Full test suite not run::Add Actions secrets GM_USERNAME and GM_PASSWORD (optional GM_OTP_CODE). See README → CI/CD."
+          echo "::notice title=Full test suite not run::Add Actions secrets GM_USERNAME+GM_PASSWORD OR VALID_USERNAME+VALID_PASSWORD (optional GM_OTP_CODE). See README → CI/CD."
           exit 0
 
       - name: Checkout
@@ -114,12 +123,21 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         env:
           CI: "true"
-          GM_USERNAME: ${{ secrets.GM_USERNAME }}
-          GM_PASSWORD: ${{ secrets.GM_PASSWORD }}
-          GM_OTP_CODE: ${{ secrets.GM_OTP_CODE }}
+          S_GM_USER: ${{ secrets.GM_USERNAME }}
+          S_GM_PASS: ${{ secrets.GM_PASSWORD }}
+          S_VAL_USER: ${{ secrets.VALID_USERNAME }}
+          S_VAL_PASS: ${{ secrets.VALID_PASSWORD }}
+          S_OTP: ${{ secrets.GM_OTP_CODE }}
           PLAYWRIGHT_TIMEOUT_MS: "90000"
           PLAYWRIGHT_NAVIGATION_TIMEOUT_MS: "120000"
-        run: python -m pytest tests/ -v --alluredir=allure-results --tb=short
+        run: |
+          trim() { printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+          export GM_USERNAME="$(trim "$S_GM_USER")"
+          [ -z "$GM_USERNAME" ] && export GM_USERNAME="$(trim "$S_VAL_USER")"
+          export GM_PASSWORD="$(trim "$S_GM_PASS")"
+          [ -z "$GM_PASSWORD" ] && export GM_PASSWORD="$(trim "$S_VAL_PASS")"
+          export GM_OTP_CODE="$(trim "$S_OTP")"
+          python -m pytest tests/ -v --alluredir=allure-results --tb=short
 
       - name: E2E passed — job summary
         if: success() && steps.gate.outputs.run == 'true'

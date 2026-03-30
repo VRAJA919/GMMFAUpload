@@ -152,15 +152,16 @@ git push -u origin main
 
 Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-**Run full E2E in CI:** add **repository secrets** (Settings → Secrets and variables → Actions):
+**Run full E2E in CI:** add **repository secrets** (repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**). You only need **one** of these pairs (names are **case-sensitive**):
 
-| Secret | Purpose |
-|--------|---------|
-| `GM_USERNAME` | GeoManager user |
-| `GM_PASSWORD` | Password |
-| `GM_OTP_CODE` | Optional; when MFA is always required |
+| Option | Secrets to create | Notes |
+|--------|-------------------|--------|
+| **A — GMMFAUpload** | `GM_USERNAME`, `GM_PASSWORD` | Matches `config/settings.py` / `.env` |
+| **B — same as GMloginMFA** | `VALID_USERNAME`, `VALID_PASSWORD` | Reuse if you already use these in another repo; the workflow maps them to `GM_*` for pytest |
 
-Until `GM_USERNAME` and `GM_PASSWORD` are set, the **e2e** job prints a notice and skips the Playwright run (same gate pattern as GMloginMFA).
+Optional: `GM_OTP_CODE` when MFA always appears after password.
+
+If **neither** pair is defined, the **e2e** job skips on purpose (no credentials to log in).
 
 **Manual run:** Actions → **CI** → **Run workflow**.
 
@@ -184,7 +185,7 @@ Pipeline: [`Jenkinsfile`](Jenkinsfile) at repo root.
 
 | Symptom | What to check |
 |--------|----------------|
-| **E2E skipped on GitHub** | Secret names **`GM_USERNAME`** and **`GM_PASSWORD`** (case-sensitive). |
+| **E2E skipped on GitHub** | Add **`GM_USERNAME` + `GM_PASSWORD`** *or* **`VALID_USERNAME` + `VALID_PASSWORD`** under **Repository secrets** (not Environment secrets, unless you add `environment:` to the job). |
 | **Done / upload timeout** | Firefox vs Chromium differences; `GmUserUploadPage` includes iframe + JS fallback for **Done**. Run with `--headed` to observe. |
 | **MFA error** | Set `GM_OTP_CODE` or extend flow with Mailinator like GMloginMFA. |
 
