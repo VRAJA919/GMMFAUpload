@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from playwright.sync_api import Page
 
 from config import settings
@@ -31,7 +33,12 @@ class LoginFlow:
         self._login.open()
         self._login.sign_in(user, pwd)
 
-        if self._mfa.is_mfa_visible():
+        # Do not wait for networkidle here — it can dismiss the "Loading GeoManager" overlay
+        # before finish_login_transition() needs to click it.
+
+        # GitHub-hosted runners are slower; give MFA time to appear before continuing to shell steps.
+        mfa_wait_ms = 22_000 if os.getenv("CI") else 8_000
+        if self._mfa.is_mfa_visible(timeout_ms=mfa_wait_ms):
             if not otp:
                 raise RuntimeError(
                     "MFA is required for this account; set GM_OTP_CODE in .env "

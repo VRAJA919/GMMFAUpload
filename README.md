@@ -186,6 +186,8 @@ Pipeline: [`Jenkinsfile`](Jenkinsfile) at repo root.
 | Symptom | What to check |
 |--------|----------------|
 | **E2E skipped on GitHub** | Add **`GM_USERNAME` + `GM_PASSWORD`** *or* **`VALID_USERNAME` + `VALID_PASSWORD`** under **Repository secrets** (not Environment secrets, unless you add `environment:` to the job). |
+| **E2E fails after login** | If the account shows **MFA**, add repository secret **`GM_OTP_CODE`** (6 digits). The flow waits longer for MFA when **`CI=true`** (GitHub Actions). |
+| **Missing CSV in CI** | The workflow checks for **`define_user (1).csv`** at the repo root; commit it or set **`GM_UPLOAD_CSV`** to a path that exists in the checkout. |
 | **Done / upload timeout** | Firefox vs Chromium differences; `GmUserUploadPage` includes iframe + JS fallback for **Done**. Run with `--headed` to observe. |
 | **MFA error** | Set `GM_OTP_CODE` or extend flow with Mailinator like GMloginMFA. |
 

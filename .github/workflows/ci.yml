@@ -119,6 +119,15 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: python -m playwright install --with-deps chromium
 
+      - name: Verify upload CSV in workspace
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          ls -la
+          if [ ! -f "define_user (1).csv" ]; then
+            echo "::error title=Missing CSV::Commit define_user (1).csv at repo root or set GM_UPLOAD_CSV to a checked-in path."
+            exit 1
+          fi
+
       - name: Run E2E tests
         if: steps.gate.outputs.run == 'true'
         env:
@@ -128,7 +137,7 @@ jobs:
           S_VAL_USER: ${{ secrets.VALID_USERNAME }}
           S_VAL_PASS: ${{ secrets.VALID_PASSWORD }}
           S_OTP: ${{ secrets.GM_OTP_CODE }}
-          PLAYWRIGHT_TIMEOUT_MS: "90000"
+          PLAYWRIGHT_TIMEOUT_MS: "120000"
           PLAYWRIGHT_NAVIGATION_TIMEOUT_MS: "120000"
         run: |
           trim() { printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }

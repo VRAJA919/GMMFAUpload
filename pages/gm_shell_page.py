@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from playwright.sync_api import Page
 
 from config import settings
@@ -13,7 +15,17 @@ class GmShellPage(BasePage):
         super().__init__(page)
 
     def finish_login_transition(self) -> None:
-        self.page.get_by_text("Loading GeoManager™").click()
+        # Prefer exact copy; fallback to anchored regex (broad "GeoManager" regex can match wrong nodes).
+        loading = (
+            self.page.get_by_text("Loading GeoManager™")
+            .or_(self.page.get_by_text(re.compile(r"^\s*Loading\s+GeoManager", re.I)))
+            .first
+        )
+        try:
+            loading.wait_for(state="visible", timeout=25_000)
+            loading.click(timeout=15_000, force=True)
+        except Exception:
+            pass
         self.page.locator(settings.GM_PRODUCT_TILE_SELECTOR).first.click()
 
     def open_user_administration_from_menu(self) -> None:
