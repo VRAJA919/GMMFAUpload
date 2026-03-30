@@ -1,0 +1,136 @@
+# CI/CD: install deps, Playwright Chromium, collection smoke, optional E2E (GeoManager upload flow).
+#
+# Full Playwright suite runs when repository secrets GM_USERNAME and GM_PASSWORD are set.
+# Optional: GM_OTP_CODE if your tenant always shows MFA after password.
+#
+# GitHub does not allow `secrets` in job-level `if`. E2E is gated via a step output.
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Install & test collection
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Install Playwright Chromium (with OS deps)
+        run: python -m playwright install --with-deps chromium
+
+      - name: Pytest collection smoke
+        run: python -m pytest --collect-only -q
+
+  e2e:
+    name: E2E (GeoManager login + user upload)
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check required secrets
+        id: gate
+        run: |
+          U=$(printf '%s' "$GM_USERNAME" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+          P=$(printf '%s' "$GM_PASSWORD" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+          if [ -n "$U" ] && [ -n "$P" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "## E2E gate"
+              echo "Secrets \`GM_USERNAME\` and \`GM_PASSWORD\` are set. Running \`pytest tests/\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "## E2E gate — skipped"
+              echo "Missing **GM_USERNAME** and/or **GM_PASSWORD** (case-sensitive names)."
+              echo ""
+              echo "Add them under **Settings → Secrets and variables → Actions**."
+              echo "Optional: **GM_OTP_CODE** for MFA after password."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+        env:
+          GM_USERNAME: ${{ secrets.GM_USERNAME }}
+          GM_PASSWORD: ${{ secrets.GM_PASSWORD }}
+
+      - name: Full E2E skipped — add repository secrets
+        if: steps.gate.outputs.run != 'true'
+        run: |
+          echo "::notice title=Full test suite not run::Add Actions secrets GM_USERNAME and GM_PASSWORD (optional GM_OTP_CODE). See README → CI/CD."
+          exit 0
+
+      - name: Checkout
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Install Playwright Chromium (with OS deps)
+        if: steps.gate.outputs.run == 'true'
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        if: steps.gate.outputs.run == 'true'
+        env:
+          CI: "true"
+          GM_USERNAME: ${{ secrets.GM_USERNAME }}
+          GM_PASSWORD: ${{ secrets.GM_PASSWORD }}
+          GM_OTP_CODE: ${{ secrets.GM_OTP_CODE }}
+          PLAYWRIGHT_TIMEOUT_MS: "90000"
+          PLAYWRIGHT_NAVIGATION_TIMEOUT_MS: "120000"
+        run: python -m pytest tests/ -v --alluredir=allure-results --tb=short
+
+      - name: E2E passed — job summary
+        if: success() && steps.gate.outputs.run == 'true'
+        run: |
+          echo "## Playwright E2E" >> "$GITHUB_STEP_SUMMARY"
+          echo "All tests under \`tests/\` passed." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Allure results on failure
+        if: failure() && steps.gate.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-gmmfaupload
+          path: allure-results/
+          if-no-files-found: ignore
