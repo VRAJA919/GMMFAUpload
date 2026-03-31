@@ -119,6 +119,33 @@ class GmUserUploadPage(BasePage):
                 pass
         raise PlaywrightTimeoutError(f"Done control not found in any frame: {last_err}")
 
+    def expect_upload_success_message(self, timeout_ms: int = 120_000) -> None:
+        """
+        Assert the iframe shows an upload-completed line after Submit (before Done).
+        Isolates upload failures from login/navigation issues.
+        """
+        deadline = time.monotonic() + timeout_ms / 1000.0
+        pat = re.compile(r"Upload\s+completed", re.I)
+        last_err: Exception | None = None
+        while time.monotonic() < deadline:
+            if self.page.is_closed():
+                raise AssertionError("Page closed while waiting for upload completion message.")
+            for frame in self.page.frames:
+                try:
+                    loc = frame.get_by_text(pat).first
+                    loc.wait_for(state="visible", timeout=800)
+                    return
+                except PlaywrightTimeoutError as e:
+                    last_err = e
+                except Exception as e:
+                    last_err = e
+            time.sleep(0.25)
+        raise AssertionError(
+            "Upload completion text not found in any frame after submit. "
+            "Check CSV validity, permissions, or iframe content. "
+            f"Last wait error: {last_err!r}"
+        )
+
     def acknowledge_success_and_close(self) -> None:
         try:
             self.page.wait_for_load_state("networkidle", timeout=45_000)
@@ -126,3 +153,9 @@ class GmUserUploadPage(BasePage):
             pass
         self._try_click_completion_line_anywhere()
         self._click_done_in_any_frame()
+        # Help focus return to main shell; residual dialogs can hide top-bar assertions.
+        for _ in range(3):
+            try:
+                self.page.keyboard.press("Escape")
+            except Exception:
+                break

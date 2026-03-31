@@ -27,6 +27,7 @@ class UserUploadFlow:
         self._upload.open_upload_user_screen()
         self._upload.attach_csv(path)
         self._upload.submit_file_upload()
+        self._upload.expect_upload_success_message()
         self._upload.acknowledge_success_and_close()
 
     def sign_out(self) -> None:

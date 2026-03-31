@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
+import time
 
-from playwright.sync_api import Frame, Page, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import Frame, Page, TimeoutError as PlaywrightTimeoutError, expect
 
 from config import settings
 from pages.base_page import BasePage
@@ -15,7 +16,8 @@ class GmShellPage(BasePage):
         super().__init__(page)
 
     def _administration_entry(self):
-        return self.page.get_by_text("Administration").first
+        # Substring match would hit hidden headings like "Welcome to GeoManager Administration."
+        return self.page.get_by_text("Administration", exact=True).first
 
     def _shell_ready(self, timeout_ms: int) -> bool:
         try:
@@ -78,8 +80,9 @@ class GmShellPage(BasePage):
         self.wait_visible(self._administration_entry(), timeout_ms=120_000)
 
     def open_user_administration_from_menu(self) -> None:
-        self.wait_visible(self.page.get_by_text("Administration"))
-        self.page.get_by_text("Administration").click()
+        adm = self.page.get_by_text("Administration", exact=True)
+        self.wait_visible(adm)
+        adm.click()
         self.wait_visible(self.page.get_by_text("User", exact=True))
         self.page.get_by_text("User", exact=True).click()
         ua = self.page.get_by_text("User Administration").nth(1)
@@ -89,3 +92,49 @@ class GmShellPage(BasePage):
     def logout(self) -> None:
         self.wait_visible(self.page.get_by_text("Logout"))
         self.page.get_by_text("Logout").click()
+
+    def expect_still_logged_in(self, timeout_ms: int | None = None) -> None:
+        """
+        Assert the session is still active (not redirected to secured login).
+        Use after heavy iframe/modal flows where top-bar locators can match hidden duplicates.
+        """
+        t = timeout_ms if timeout_ms is not None else self.default_timeout_ms
+        expect(self.page).not_to_have_url(re.compile(r"login\.html"), timeout=t)
+
+    def expect_authenticated_shell(self, timeout_ms: int | None = None) -> None:
+        """
+        Assert user is past login and the shell is usable.
+
+        Scans **every frame** for a visible ``Logout`` or exact ``Administration`` (Qooxdoo may
+        host the top bar in the main document or a child frame; substring matches are avoided).
+        Dismisses stray overlays with Escape while polling.
+        """
+        t = timeout_ms if timeout_ms is not None else self.default_timeout_ms
+        expect(self.page).not_to_have_url(re.compile(r"login\.html"), timeout=t)
+        deadline = time.monotonic() + t / 1000.0
+        last_err: Exception | None = None
+        esc_every = 0
+        while time.monotonic() < deadline:
+            if esc_every % 8 == 0:
+                try:
+                    self.page.keyboard.press("Escape")
+                except Exception:
+                    pass
+            esc_every += 1
+            for frame in self.page.frames:
+                for loc in (
+                    frame.get_by_text("Logout").first,
+                    frame.get_by_text("Administration", exact=True).first,
+                ):
+                    try:
+                        loc.wait_for(state="visible", timeout=600)
+                        return
+                    except PlaywrightTimeoutError as e:
+                        last_err = e
+                    except Exception as e:
+                        last_err = e
+            time.sleep(0.15)
+        raise AssertionError(
+            "Authenticated shell not detected: no visible Logout or exact 'Administration' "
+            f"in any frame within {t} ms. Last error: {last_err!r}"
+        )
