@@ -167,16 +167,16 @@ If **neither** pair is set, **e2e** skips (no login).
 
 ### 2. MFA / OTP (required for EU PROD tests to **pass**)
 
-The **E2E job runs** when **login** secrets (section 1) are set. After password, PROD usually shows **email MFA** — without OTP secrets below, `pytest` may **fail** at login (not skipped).
+The **E2E job runs** when **login** secrets (section 1) are set. After password, PROD shows **email MFA**. Configure **at least one** of the following (the workflow sets `MAILINATOR_DOMAIN=public`):
 
-| Secret | When to use |
-|--------|-------------|
-| **`GM_OTP_EMAIL`** | **Recommended** — full Mailinator address (e.g. `you@mailinator.com`). CI sets `MAILINATOR_DOMAIN=public`. |
-| **`OTP_EMAIL`** | Same as GMloginMFA — local-part or full address; workflow maps it to `GM_OTP_EMAIL`. |
-| **`GM_OTP_CODE`** | Fixed 6-digit code (short-lived; prefer email secrets). |
-| **`IMAP_HOST`** + **`IMAP_USER`** | Also set **`IMAP_PASSWORD`** if you fetch OTP via IMAP instead of Mailinator. |
+| Where | Name | When to use |
+|-------|------|---------------|
+| **Secrets** | `GM_OTP_EMAIL` or `OTP_EMAIL` | Full Mailinator address (e.g. `you@mailinator.com`). |
+| **Variables** (not masked) | `GM_OTP_EMAIL` or `OTP_EMAIL` | Same value if you prefer **Settings → Secrets and variables → Actions → Variables** (inbox is often non-sensitive). |
+| **Secrets** | `GM_OTP_CODE` | Static 6-digit code (short-lived). |
+| **Secrets** | `IMAP_HOST`, `IMAP_USER`, `IMAP_PASSWORD` | IMAP OTP fetch instead of Mailinator. |
 
-If only login secrets are configured, the workflow Summary may show a **note** reminding you to add MFA secrets.
+If none of these are set, the **Run E2E tests** step **fails immediately** with an error annotation (so you do not wait through three timed-out tests).
 
 **Manual run:** Actions → **CI** → **Run workflow**.
 

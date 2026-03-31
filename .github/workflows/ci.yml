@@ -3,7 +3,7 @@
 # E2E runs when EITHER pair of login secrets is set (trimmed, non-empty):
 #   - GM_USERNAME + GM_PASSWORD  (this repo’s convention), OR
 #   - VALID_USERNAME + VALID_PASSWORD  (same names as GMloginMFA — reuse without duplicating secrets)
-# MFA/OTP secrets (GM_OTP_EMAIL, OTP_EMAIL, etc.) are optional in the gate — add them or pytest fails at MFA on PROD.
+# MFA: pass GM_OTP_EMAIL / OTP_EMAIL via **secrets** or **repository Variables** (vars.*). Run step fails fast if missing.
 # GitHub does not allow `secrets` in job-level `if`; E2E is gated via outputs.
 
 name: CI
@@ -104,10 +104,8 @@ jobs:
           {
             echo "## E2E gate"
             echo "Login credentials found. Running \`pytest tests/\`."
-            if [ -z "$O" ] && [ -z "$E1" ] && [ -z "$E2" ] && { [ -z "$IH" ] || [ -z "$IU" ]; }; then
-              echo ""
-              echo "> **Note:** No OTP/MFA secrets detected (\`GM_OTP_EMAIL\`, \`OTP_EMAIL\`, \`GM_OTP_CODE\`, or IMAP). If PROD requires email MFA, add one of these or the job may **fail** at login."
-            fi
+            echo ""
+            echo "PROD needs MFA: set **secret** or **variable** \`GM_OTP_EMAIL\` (or \`OTP_EMAIL\`) to your Mailinator address, or \`GM_OTP_CODE\` / IMAP. The **Run E2E** step exits early if none are configured."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: E2E skipped — see summary above
@@ -159,6 +157,9 @@ jobs:
           S_OTP: ${{ secrets.GM_OTP_CODE }}
           S_GM_OTP_EMAIL: ${{ secrets.GM_OTP_EMAIL }}
           S_OTP_EMAIL: ${{ secrets.OTP_EMAIL }}
+          # Non-secret inbox (e.g. user@mailinator.com) — Settings → Variables → Actions
+          S_VAR_GM_OTP_EMAIL: ${{ vars.GM_OTP_EMAIL }}
+          S_VAR_OTP_EMAIL: ${{ vars.OTP_EMAIL }}
           S_IMAP_HOST: ${{ secrets.IMAP_HOST }}
           S_IMAP_USER: ${{ secrets.IMAP_USER }}
           S_IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
@@ -174,13 +175,23 @@ jobs:
           [ -n "$OTP_TRIM" ] && export GM_OTP_CODE="$OTP_TRIM"
           export GM_OTP_EMAIL="$(trim "$S_GM_OTP_EMAIL")"
           [ -z "$GM_OTP_EMAIL" ] && export GM_OTP_EMAIL="$(trim "$S_OTP_EMAIL")"
+          [ -z "$GM_OTP_EMAIL" ] && export GM_OTP_EMAIL="$(trim "$S_VAR_GM_OTP_EMAIL")"
+          [ -z "$GM_OTP_EMAIL" ] && export GM_OTP_EMAIL="$(trim "$S_VAR_OTP_EMAIL")"
+          export OTP_EMAIL="$(trim "$S_OTP_EMAIL")"
+          [ -z "$OTP_EMAIL" ] && export OTP_EMAIL="$(trim "$S_VAR_OTP_EMAIL")"
+          [ -z "$OTP_EMAIL" ] && [ -n "$GM_OTP_EMAIL" ] && export OTP_EMAIL="$GM_OTP_EMAIL"
           IH="$(trim "$S_IMAP_HOST")"
           IU="$(trim "$S_IMAP_USER")"
           IP="$(trim "$S_IMAP_PASSWORD")"
           [ -n "$IH" ] && export IMAP_HOST="$IH"
           [ -n "$IU" ] && export IMAP_USER="$IU"
           [ -n "$IP" ] && export IMAP_PASSWORD="$IP"
-          python -m pytest tests/ -v --alluredir=allure-results --tb=short
+          # PROD MFA: fail fast with one annotation instead of 3 long pytest timeouts
+          if [ -z "${GM_OTP_CODE:-}" ] && [ -z "${GM_OTP_EMAIL:-}" ] && [ -z "${OTP_EMAIL:-}" ] && { [ -z "${IMAP_HOST:-}" ] || [ -z "${IMAP_USER:-}" ]; }; then
+            echo "::error title=MFA/OTP not configured for CI::Add repository **Secret** or **Variable** GM_OTP_EMAIL (e.g. youruser@mailinator.com) or OTP_EMAIL, or secret GM_OTP_CODE, or IMAP_HOST+IMAP_USER+IMAP_PASSWORD. Workflow sets MAILINATOR_DOMAIN=public. See README CI/CD."
+            exit 1
+          fi
+          python -m pytest tests/ -v --maxfail=1 --alluredir=allure-results --tb=short
 
       - name: E2E passed — job summary
         if: success() && steps.gate.outputs.run == 'true'
