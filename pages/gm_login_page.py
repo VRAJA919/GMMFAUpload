@@ -19,7 +19,7 @@ class GmLoginPage(BasePage):
             timeout=settings.NAVIGATION_TIMEOUT_MS,
         )
 
-    def sign_in(self, username: str, password: str) -> None:
+    def fill_credentials(self, username: str, password: str) -> None:
         user = self.page.get_by_role("textbox", name="Username")
         pwd = self.page.get_by_role("textbox", name="Password")
         self.wait_visible(user)
@@ -28,4 +28,10 @@ class GmLoginPage(BasePage):
         user.fill(username)
         user.press("Tab")
         pwd.fill(password)
+
+    def submit(self) -> None:
         self.page.get_by_role("button", name="SIGN IN").click()
+
+    def sign_in(self, username: str, password: str) -> None:
+        self.fill_credentials(username, password)
+        self.submit()

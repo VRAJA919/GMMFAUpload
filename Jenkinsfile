@@ -3,7 +3,8 @@
 // 1. Create credentials: kind "Username with password", ID: gm-mfa-upload-creds
 //    (or change credentialsId below). Optional Secret Text for GM_OTP_CODE.
 // 2. If you already export GM_USERNAME / GM_PASSWORD on the agent, you can remove
-//    withCredentials and pass env only (see README).
+//    withCredentials and pass env only (see README). For PROD MFA without a static code,
+//    set GM_OTP_EMAIL (Mailinator inbox) and MAILINATOR_DOMAIN=public on the agent or via withEnv.
 
 pipeline {
     agent any

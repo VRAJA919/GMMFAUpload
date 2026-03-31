@@ -1,4 +1,4 @@
-"""Password sign-in plus optional MFA, then shell transition."""
+"""Password sign-in plus MFA (static OTP or Mailinator/IMAP like GMloginMFA), then shell."""
 
 from __future__ import annotations
 
@@ -10,6 +10,11 @@ from config import settings
 from pages.gm_login_page import GmLoginPage
 from pages.gm_mfa_page import GmMFAPage
 from pages.gm_shell_page import GmShellPage
+from utils.email_helper import (
+    mailinator_existing_message_ids,
+    otp_retrieval_configured,
+    wait_for_otp,
+)
 
 
 class LoginFlow:
@@ -30,19 +35,44 @@ class LoginFlow:
         pwd = password if password is not None else settings.GM_PASSWORD
         otp = otp_code if otp_code is not None else settings.GM_OTP_CODE
 
+        if not user or not pwd:
+            raise RuntimeError(
+                "Set GM_USERNAME and GM_PASSWORD in .env (or pass username= / password=)."
+            )
+
+        inbox = settings.otp_mailinator_inbox()
+        use_dynamic_otp = (
+            otp is None
+            and inbox is not None
+            and otp_retrieval_configured()
+        )
+
         self._login.open()
-        self._login.sign_in(user, pwd)
+
+        mail_ids_before: set[str] | None = None
+        if use_dynamic_otp:
+            mail_ids_before = mailinator_existing_message_ids(inbox)
+            self._login.fill_credentials(user, pwd)
+            self._login.submit()
+        else:
+            self._login.sign_in(user, pwd)
 
         # Do not wait for networkidle here — it can dismiss the "Loading GeoManager" overlay
         # before finish_login_transition() needs to click it.
 
-        # GitHub-hosted runners are slower; give MFA time to appear before continuing to shell steps.
         mfa_wait_ms = 22_000 if os.getenv("CI") else 8_000
         if self._mfa.is_mfa_visible(timeout_ms=mfa_wait_ms):
             if not otp:
-                raise RuntimeError(
-                    "MFA is required for this account; set GM_OTP_CODE in .env "
-                    "or pass otp_code= to LoginFlow.authenticate()."
+                if not use_dynamic_otp:
+                    raise RuntimeError(
+                        "MFA is required: set GM_OTP_CODE, or GM_OTP_EMAIL with "
+                        "MAILINATOR_DOMAIN=public (or MAILINATOR_API_TOKEN / IMAP_*), "
+                        "or pass otp_code= to LoginFlow.authenticate()."
+                    )
+                assert inbox is not None
+                otp = wait_for_otp(
+                    inbox,
+                    exclude_message_ids=mail_ids_before or set(),
                 )
             self._mfa.enter_and_submit_otp(otp)
 

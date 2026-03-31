@@ -46,6 +46,7 @@ class GmMFAPage(BasePage):
             "button:has-text('VERIFY')",
             "button:has-text('Verify')",
             "button:has-text('CONTINUE')",
+            "button:has-text('Submit')",
         ):
             btn = self.page.locator(sel).first
             if btn.count() > 0 and btn.is_enabled():

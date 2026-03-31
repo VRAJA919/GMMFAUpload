@@ -87,14 +87,14 @@ jobs:
               echo "| A (this repo) | \`GM_USERNAME\`, \`GM_PASSWORD\` |"
               echo "| B (same as GMloginMFA) | \`VALID_USERNAME\`, \`VALID_PASSWORD\` |"
               echo ""
-              echo "Optional: \`GM_OTP_CODE\` if MFA appears after password."
+              echo "MFA: set \`GM_OTP_EMAIL\` (Mailinator inbox) + \`MAILINATOR_DOMAIN=public\`, or \`GM_OTP_CODE\`, or IMAP_*."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Full E2E skipped — add repository secrets
         if: steps.gate.outputs.run != 'true'
         run: |
-          echo "::notice title=Full test suite not run::Add Actions secrets GM_USERNAME+GM_PASSWORD OR VALID_USERNAME+VALID_PASSWORD (optional GM_OTP_CODE). See README → CI/CD."
+          echo "::notice title=Full test suite not run::Add Actions secrets GM_USERNAME+GM_PASSWORD OR VALID_USERNAME+VALID_PASSWORD; for MFA add GM_OTP_EMAIL or GM_OTP_CODE. See README → CI/CD."
           exit 0
 
       - name: Checkout
@@ -137,6 +137,8 @@ jobs:
           S_VAL_USER: ${{ secrets.VALID_USERNAME }}
           S_VAL_PASS: ${{ secrets.VALID_PASSWORD }}
           S_OTP: ${{ secrets.GM_OTP_CODE }}
+          S_GM_OTP_EMAIL: ${{ secrets.GM_OTP_EMAIL }}
+          S_OTP_EMAIL: ${{ secrets.OTP_EMAIL }}
           PLAYWRIGHT_TIMEOUT_MS: "120000"
           PLAYWRIGHT_NAVIGATION_TIMEOUT_MS: "120000"
         run: |
@@ -146,6 +148,8 @@ jobs:
           export GM_PASSWORD="$(trim "$S_GM_PASS")"
           [ -z "$GM_PASSWORD" ] && export GM_PASSWORD="$(trim "$S_VAL_PASS")"
           export GM_OTP_CODE="$(trim "$S_OTP")"
+          export GM_OTP_EMAIL="$(trim "$S_GM_OTP_EMAIL")"
+          [ -z "$GM_OTP_EMAIL" ] && export GM_OTP_EMAIL="$(trim "$S_OTP_EMAIL")"
           python -m pytest tests/ -v --alluredir=allure-results --tb=short
 
       - name: E2E passed — job summary
