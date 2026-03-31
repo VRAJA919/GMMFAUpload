@@ -1,9 +1,9 @@
 # CI/CD: install deps, Playwright Chromium, collection smoke, optional E2E (GeoManager upload flow).
 #
-# E2E runs when EITHER pair of secrets is set (trimmed, non-empty):
+# E2E runs when EITHER pair of login secrets is set (trimmed, non-empty):
 #   - GM_USERNAME + GM_PASSWORD  (this repo’s convention), OR
 #   - VALID_USERNAME + VALID_PASSWORD  (same names as GMloginMFA — reuse without duplicating secrets)
-# MFA on PROD: E2E also requires GM_OTP_EMAIL, OTP_EMAIL, GM_OTP_CODE, or IMAP_* (see gate step).
+# MFA/OTP secrets (GM_OTP_EMAIL, OTP_EMAIL, etc.) are optional in the gate — add them or pytest fails at MFA on PROD.
 # GitHub does not allow `secrets` in job-level `if`; E2E is gated via outputs.
 
 name: CI
@@ -94,31 +94,7 @@ jobs:
               echo "| A | \`GM_USERNAME\`, \`GM_PASSWORD\` |"
               echo "| B (GMloginMFA names) | \`VALID_USERNAME\`, \`VALID_PASSWORD\` |"
               echo ""
-              echo "**PROD GeoManager also requires MFA** — after credentials, add at least one OTP secret (next gate)."
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          MFA_OK=false
-          if [ -n "$O" ]; then MFA_OK=true; fi
-          if [ -n "$E1" ] || [ -n "$E2" ]; then MFA_OK=true; fi
-          if [ -n "$IH" ] && [ -n "$IU" ]; then MFA_OK=true; fi
-
-          if [ "$MFA_OK" != true ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "reason=mfa" >> "$GITHUB_OUTPUT"
-            {
-              echo "## E2E gate — skipped (MFA / OTP not configured)"
-              echo "Login credentials are set, but **PROD** shows **email MFA** after password. Add **at least one** repository secret:"
-              echo ""
-              echo "| Secret | Use when |"
-              echo "|--------|----------|"
-              echo "| \`GM_OTP_EMAIL\` | Recommended — full Mailinator address, e.g. \`you@mailinator.com\` (workflow sets \`MAILINATOR_DOMAIN=public\`) |"
-              echo "| \`OTP_EMAIL\` | Same as GMloginMFA — local-part or full address |"
-              echo "| \`GM_OTP_CODE\` | Static 6-digit code (short-lived; prefer email secrets) |"
-              echo "| \`IMAP_HOST\` + \`IMAP_USER\` | Plus \`IMAP_PASSWORD\` in the E2E step — IMAP OTP fetch |"
-              echo ""
-              echo "Without one of these, \`pytest\` would fail at MFA with \`RuntimeError\`."
+              echo "For **PROD MFA**, also add \`GM_OTP_EMAIL\` or \`OTP_EMAIL\` (or \`GM_OTP_CODE\` / IMAP) — see README."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -127,18 +103,17 @@ jobs:
           echo "reason=ok" >> "$GITHUB_OUTPUT"
           {
             echo "## E2E gate"
-            echo "Login + MFA/OTP path configured. Running \`pytest tests/\`."
+            echo "Login credentials found. Running \`pytest tests/\`."
+            if [ -z "$O" ] && [ -z "$E1" ] && [ -z "$E2" ] && { [ -z "$IH" ] || [ -z "$IU" ]; }; then
+              echo ""
+              echo "> **Note:** No OTP/MFA secrets detected (\`GM_OTP_EMAIL\`, \`OTP_EMAIL\`, \`GM_OTP_CODE\`, or IMAP). If PROD requires email MFA, add one of these or the job may **fail** at login."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: E2E skipped — see summary above
         if: steps.gate.outputs.run != 'true'
         run: |
-          R="${{ steps.gate.outputs.reason }}"
-          if [ "$R" = "mfa" ]; then
-            echo "::notice title=MFA secrets required::Add GM_OTP_EMAIL or OTP_EMAIL (Mailinator), or GM_OTP_CODE, or IMAP_HOST+IMAP_USER. See README CI/CD and the workflow run Summary."
-          else
-            echo "::notice title=E2E skipped::Add GM_USERNAME+GM_PASSWORD or VALID_USERNAME+VALID_PASSWORD."
-          fi
+          echo "::notice title=E2E skipped::Add repository secrets GM_USERNAME+GM_PASSWORD or VALID_USERNAME+VALID_PASSWORD. For PROD MFA add GM_OTP_EMAIL or OTP_EMAIL. See README → CI/CD."
           exit 0
 
       - name: Checkout

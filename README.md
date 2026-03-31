@@ -165,25 +165,25 @@ Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 If **neither** pair is set, **e2e** skips (no login).
 
-### 2. MFA / OTP (required for EU PROD)
+### 2. MFA / OTP (required for EU PROD tests to **pass**)
 
-After password, GeoManager sends **email MFA**. The workflow will **not** run `pytest` until **at least one** of these is set (otherwise the run used to fail with `RuntimeError` at MFA):
+The **E2E job runs** when **login** secrets (section 1) are set. After password, PROD usually shows **email MFA** — without OTP secrets below, `pytest` may **fail** at login (not skipped).
 
 | Secret | When to use |
 |--------|-------------|
 | **`GM_OTP_EMAIL`** | **Recommended** — full Mailinator address (e.g. `you@mailinator.com`). CI sets `MAILINATOR_DOMAIN=public`. |
 | **`OTP_EMAIL`** | Same as GMloginMFA — local-part or full address; workflow maps it to `GM_OTP_EMAIL`. |
-| **`GM_OTP_CODE`** | Fixed 6-digit code (expires quickly; prefer email secrets). |
+| **`GM_OTP_CODE`** | Fixed 6-digit code (short-lived; prefer email secrets). |
 | **`IMAP_HOST`** + **`IMAP_USER`** | Also set **`IMAP_PASSWORD`** if you fetch OTP via IMAP instead of Mailinator. |
 
-Until you add one of the above, **e2e** completes successfully but **skips** Playwright with a clear **Summary** / notice (instead of a red failed test step).
+If only login secrets are configured, the workflow Summary may show a **note** reminding you to add MFA secrets.
 
 **Manual run:** Actions → **CI** → **Run workflow**.
 
 | Job | When |
 |-----|------|
 | **validate** | Push / PR / manual: pip install, Playwright Chromium, `pytest --collect-only` |
-| **e2e** | After validate, when login **and** MFA/OTP secrets are configured: `pytest tests/ -v --alluredir=allure-results` |
+| **e2e** | After validate, when **login** secrets exist: `pytest tests/ -v --alluredir=allure-results` |
 
 On failure, **allure-results** are uploaded as an artifact.
 
