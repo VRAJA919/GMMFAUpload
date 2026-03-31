@@ -43,7 +43,7 @@ playwright install chromium
 playwright install firefox
 ```
 
-6. Copy `.env.example` to `.env` and set at least `GM_USERNAME`, `GM_PASSWORD`. If your tenant shows MFA after password, set **`GM_OTP_CODE`** (6 digits) or extend the flow to fetch OTP (see GMloginMFA Mailinator pattern).
+6. Copy `.env.example` to `.env` and set `GM_USERNAME`, `GM_PASSWORD`. If MFA appears after password, set **`GM_OTP_EMAIL`** (e.g. `you@mailinator.com`) and **`MAILINATOR_DOMAIN=public`**, or set **`GM_OTP_CODE`** for a one-shot code.
 
 ## Run tests (every time)
 
@@ -104,7 +104,9 @@ allure serve allure-results
 |----------|---------|
 | `GM_LOGIN_URL` | Secured login page URL |
 | `GM_USERNAME` / `GM_PASSWORD` | Sign-in |
-| `GM_OTP_CODE` | 6-digit OTP when MFA appears after password |
+| `GM_OTP_EMAIL` / `OTP_EMAIL` | Mailinator inbox (full or local-part) for dynamic MFA fetch |
+| `GM_OTP_CODE` | Optional static 6-digit OTP when MFA appears |
+| `MAILINATOR_DOMAIN` | Use `public` for `@mailinator.com` (default in `settings.py`) |
 | `GM_UPLOAD_CSV` | Path to user definition CSV (default: `define_user (1).csv` at repo root) |
 | `GM_PRODUCT_TILE_SELECTOR` | CSS for post-login product tile if UI changes |
 | `PLAYWRIGHT_TIMEOUT_MS` | Default locator timeout |
@@ -152,23 +154,36 @@ git push -u origin main
 
 Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-**Run full E2E in CI:** add **repository secrets** (repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**). You only need **one** of these pairs (names are **case-sensitive**):
+**Run full E2E in CI:** add **repository secrets** (repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**). Names are **case-sensitive**.
 
-| Option | Secrets to create | Notes |
-|--------|-------------------|--------|
-| **A — GMMFAUpload** | `GM_USERNAME`, `GM_PASSWORD` | Matches `config/settings.py` / `.env` |
-| **B — same as GMloginMFA** | `VALID_USERNAME`, `VALID_PASSWORD` | Reuse if you already use these in another repo; the workflow maps them to `GM_*` for pytest |
+### 1. Login (one pair)
 
-Optional: `GM_OTP_CODE` when MFA always appears after password.
+| Option | Secrets |
+|--------|---------|
+| **A** | `GM_USERNAME`, `GM_PASSWORD` |
+| **B** (same names as GMloginMFA) | `VALID_USERNAME`, `VALID_PASSWORD` |
 
-If **neither** pair is defined, the **e2e** job skips on purpose (no credentials to log in).
+If **neither** pair is set, **e2e** skips (no login).
+
+### 2. MFA / OTP (required for EU PROD)
+
+After password, GeoManager sends **email MFA**. The workflow will **not** run `pytest` until **at least one** of these is set (otherwise the run used to fail with `RuntimeError` at MFA):
+
+| Secret | When to use |
+|--------|-------------|
+| **`GM_OTP_EMAIL`** | **Recommended** — full Mailinator address (e.g. `you@mailinator.com`). CI sets `MAILINATOR_DOMAIN=public`. |
+| **`OTP_EMAIL`** | Same as GMloginMFA — local-part or full address; workflow maps it to `GM_OTP_EMAIL`. |
+| **`GM_OTP_CODE`** | Fixed 6-digit code (expires quickly; prefer email secrets). |
+| **`IMAP_HOST`** + **`IMAP_USER`** | Also set **`IMAP_PASSWORD`** if you fetch OTP via IMAP instead of Mailinator. |
+
+Until you add one of the above, **e2e** completes successfully but **skips** Playwright with a clear **Summary** / notice (instead of a red failed test step).
 
 **Manual run:** Actions → **CI** → **Run workflow**.
 
 | Job | When |
 |-----|------|
 | **validate** | Push / PR / manual: pip install, Playwright Chromium, `pytest --collect-only` |
-| **e2e** | After validate, when secrets exist: `pytest tests/ -v --alluredir=allure-results` |
+| **e2e** | After validate, when login **and** MFA/OTP secrets are configured: `pytest tests/ -v --alluredir=allure-results` |
 
 On failure, **allure-results** are uploaded as an artifact.
 
@@ -186,7 +201,7 @@ Pipeline: [`Jenkinsfile`](Jenkinsfile) at repo root.
 | Symptom | What to check |
 |--------|----------------|
 | **E2E skipped on GitHub** | Add **`GM_USERNAME` + `GM_PASSWORD`** *or* **`VALID_USERNAME` + `VALID_PASSWORD`** under **Repository secrets** (not Environment secrets, unless you add `environment:` to the job). |
-| **E2E fails after login** | If the account shows **MFA**, add repository secret **`GM_OTP_CODE`** (6 digits). The flow waits longer for MFA when **`CI=true`** (GitHub Actions). |
+| **E2E fails or skips at MFA** | Add **`GM_OTP_EMAIL`** or **`OTP_EMAIL`** (Mailinator), or **`GM_OTP_CODE`**, or IMAP secrets. CI skips E2E with a notice if login exists but none of these are set. |
 | **Missing CSV in CI** | The workflow checks for **`define_user (1).csv`** at the repo root; commit it or set **`GM_UPLOAD_CSV`** to a path that exists in the checkout. |
 | **Done / upload timeout** | Firefox vs Chromium differences; `GmUserUploadPage` includes iframe + JS fallback for **Done**. Run with `--headed` to observe. |
 | **MFA error** | Set `GM_OTP_CODE` or extend flow with Mailinator like GMloginMFA. |

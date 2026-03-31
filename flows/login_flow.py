@@ -65,9 +65,11 @@ class LoginFlow:
             if not otp:
                 if not use_dynamic_otp:
                     raise RuntimeError(
-                        "MFA is required: set GM_OTP_CODE, or GM_OTP_EMAIL with "
+                        "MFA is required: set GM_OTP_CODE, or GM_OTP_EMAIL (or OTP_EMAIL) with "
                         "MAILINATOR_DOMAIN=public (or MAILINATOR_API_TOKEN / IMAP_*), "
-                        "or pass otp_code= to LoginFlow.authenticate()."
+                        "or pass otp_code= to LoginFlow.authenticate(). "
+                        "In GitHub Actions, add repository secrets GM_OTP_EMAIL or OTP_EMAIL "
+                        "(or GM_OTP_CODE / IMAP_*); see README CI/CD."
                     )
                 assert inbox is not None
                 otp = wait_for_otp(

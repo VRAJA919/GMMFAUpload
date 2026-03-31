@@ -3,7 +3,8 @@
 # E2E runs when EITHER pair of secrets is set (trimmed, non-empty):
 #   - GM_USERNAME + GM_PASSWORD  (this repo’s convention), OR
 #   - VALID_USERNAME + VALID_PASSWORD  (same names as GMloginMFA — reuse without duplicating secrets)
-# Optional: GM_OTP_CODE (MFA). GitHub does not allow `secrets` in job-level `if`; E2E is gated via outputs.
+# MFA on PROD: E2E also requires GM_OTP_EMAIL, OTP_EMAIL, GM_OTP_CODE, or IMAP_* (see gate step).
+# GitHub does not allow `secrets` in job-level `if`; E2E is gated via outputs.
 
 name: CI
 
@@ -64,37 +65,80 @@ jobs:
           S_GM_PASS: ${{ secrets.GM_PASSWORD }}
           S_VAL_USER: ${{ secrets.VALID_USERNAME }}
           S_VAL_PASS: ${{ secrets.VALID_PASSWORD }}
+          S_OTP: ${{ secrets.GM_OTP_CODE }}
+          S_GM_OTP_EMAIL: ${{ secrets.GM_OTP_EMAIL }}
+          S_OTP_EMAIL: ${{ secrets.OTP_EMAIL }}
+          S_IMAP_HOST: ${{ secrets.IMAP_HOST }}
+          S_IMAP_USER: ${{ secrets.IMAP_USER }}
         run: |
           trim() { printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
           U=$(trim "$S_GM_USER")
           [ -z "$U" ] && U=$(trim "$S_VAL_USER")
           P=$(trim "$S_GM_PASS")
           [ -z "$P" ] && P=$(trim "$S_VAL_PASS")
-          if [ -n "$U" ] && [ -n "$P" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            {
-              echo "## E2E gate"
-              echo "Credentials found via **GM_USERNAME** / **GM_PASSWORD** or **VALID_USERNAME** / **VALID_PASSWORD**. Running \`pytest tests/\`."
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
+          O=$(trim "$S_OTP")
+          E1=$(trim "$S_GM_OTP_EMAIL")
+          E2=$(trim "$S_OTP_EMAIL")
+          IH=$(trim "$S_IMAP_HOST")
+          IU=$(trim "$S_IMAP_USER")
+
+          if [ -z "$U" ] || [ -z "$P" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "reason=credentials" >> "$GITHUB_OUTPUT"
             {
-              echo "## E2E gate — skipped"
-              echo "Add **one** of these secret pairs (repository → **Settings** → **Secrets and variables** → **Actions**):"
+              echo "## E2E gate — skipped (no login credentials)"
+              echo "Add **one** of these pairs under **Settings → Secrets and variables → Actions**:"
               echo ""
               echo "| Pair | Secret names |"
               echo "|------|----------------|"
-              echo "| A (this repo) | \`GM_USERNAME\`, \`GM_PASSWORD\` |"
-              echo "| B (same as GMloginMFA) | \`VALID_USERNAME\`, \`VALID_PASSWORD\` |"
+              echo "| A | \`GM_USERNAME\`, \`GM_PASSWORD\` |"
+              echo "| B (GMloginMFA names) | \`VALID_USERNAME\`, \`VALID_PASSWORD\` |"
               echo ""
-              echo "MFA: set \`GM_OTP_EMAIL\` (Mailinator inbox) + \`MAILINATOR_DOMAIN=public\`, or \`GM_OTP_CODE\`, or IMAP_*."
+              echo "**PROD GeoManager also requires MFA** — after credentials, add at least one OTP secret (next gate)."
             } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
 
-      - name: Full E2E skipped — add repository secrets
+          MFA_OK=false
+          if [ -n "$O" ]; then MFA_OK=true; fi
+          if [ -n "$E1" ] || [ -n "$E2" ]; then MFA_OK=true; fi
+          if [ -n "$IH" ] && [ -n "$IU" ]; then MFA_OK=true; fi
+
+          if [ "$MFA_OK" != true ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "reason=mfa" >> "$GITHUB_OUTPUT"
+            {
+              echo "## E2E gate — skipped (MFA / OTP not configured)"
+              echo "Login credentials are set, but **PROD** shows **email MFA** after password. Add **at least one** repository secret:"
+              echo ""
+              echo "| Secret | Use when |"
+              echo "|--------|----------|"
+              echo "| \`GM_OTP_EMAIL\` | Recommended — full Mailinator address, e.g. \`you@mailinator.com\` (workflow sets \`MAILINATOR_DOMAIN=public\`) |"
+              echo "| \`OTP_EMAIL\` | Same as GMloginMFA — local-part or full address |"
+              echo "| \`GM_OTP_CODE\` | Static 6-digit code (short-lived; prefer email secrets) |"
+              echo "| \`IMAP_HOST\` + \`IMAP_USER\` | Plus \`IMAP_PASSWORD\` in the E2E step — IMAP OTP fetch |"
+              echo ""
+              echo "Without one of these, \`pytest\` would fail at MFA with \`RuntimeError\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "reason=ok" >> "$GITHUB_OUTPUT"
+          {
+            echo "## E2E gate"
+            echo "Login + MFA/OTP path configured. Running \`pytest tests/\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: E2E skipped — see summary above
         if: steps.gate.outputs.run != 'true'
         run: |
-          echo "::notice title=Full test suite not run::Add Actions secrets GM_USERNAME+GM_PASSWORD OR VALID_USERNAME+VALID_PASSWORD; for MFA add GM_OTP_EMAIL or GM_OTP_CODE. See README → CI/CD."
+          R="${{ steps.gate.outputs.reason }}"
+          if [ "$R" = "mfa" ]; then
+            echo "::notice title=MFA secrets required::Add GM_OTP_EMAIL or OTP_EMAIL (Mailinator), or GM_OTP_CODE, or IMAP_HOST+IMAP_USER. See README CI/CD and the workflow run Summary."
+          else
+            echo "::notice title=E2E skipped::Add GM_USERNAME+GM_PASSWORD or VALID_USERNAME+VALID_PASSWORD."
+          fi
           exit 0
 
       - name: Checkout
@@ -132,6 +176,7 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         env:
           CI: "true"
+          MAILINATOR_DOMAIN: public
           S_GM_USER: ${{ secrets.GM_USERNAME }}
           S_GM_PASS: ${{ secrets.GM_PASSWORD }}
           S_VAL_USER: ${{ secrets.VALID_USERNAME }}
@@ -139,6 +184,9 @@ jobs:
           S_OTP: ${{ secrets.GM_OTP_CODE }}
           S_GM_OTP_EMAIL: ${{ secrets.GM_OTP_EMAIL }}
           S_OTP_EMAIL: ${{ secrets.OTP_EMAIL }}
+          S_IMAP_HOST: ${{ secrets.IMAP_HOST }}
+          S_IMAP_USER: ${{ secrets.IMAP_USER }}
+          S_IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
           PLAYWRIGHT_TIMEOUT_MS: "120000"
           PLAYWRIGHT_NAVIGATION_TIMEOUT_MS: "120000"
         run: |
@@ -147,9 +195,16 @@ jobs:
           [ -z "$GM_USERNAME" ] && export GM_USERNAME="$(trim "$S_VAL_USER")"
           export GM_PASSWORD="$(trim "$S_GM_PASS")"
           [ -z "$GM_PASSWORD" ] && export GM_PASSWORD="$(trim "$S_VAL_PASS")"
-          export GM_OTP_CODE="$(trim "$S_OTP")"
+          OTP_TRIM="$(trim "$S_OTP")"
+          [ -n "$OTP_TRIM" ] && export GM_OTP_CODE="$OTP_TRIM"
           export GM_OTP_EMAIL="$(trim "$S_GM_OTP_EMAIL")"
           [ -z "$GM_OTP_EMAIL" ] && export GM_OTP_EMAIL="$(trim "$S_OTP_EMAIL")"
+          IH="$(trim "$S_IMAP_HOST")"
+          IU="$(trim "$S_IMAP_USER")"
+          IP="$(trim "$S_IMAP_PASSWORD")"
+          [ -n "$IH" ] && export IMAP_HOST="$IH"
+          [ -n "$IU" ] && export IMAP_USER="$IU"
+          [ -n "$IP" ] && export IMAP_PASSWORD="$IP"
           python -m pytest tests/ -v --alluredir=allure-results --tb=short
 
       - name: E2E passed — job summary
